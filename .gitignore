@@ -1,0 +1,20 @@
+# Debian Rootfs (downloaded and bootstrapped dynamically)
+rootfs/
+
+# Build caches & compiler targets
+rust-core/target/
+android/.gradle/
+android/app/build/
+android/app/.cxx/
+android/.cxx/
+.cxx/
+android/local.properties
+.gradle/
+build/
+web/node_modules/
+
+# OS & Editor temp files
+.DS_Store
+Thumbs.db
+*.swp
+*~

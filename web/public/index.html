@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>DebTerm - PRoot Debian Terminal (Termux Architecture)</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="logo-area">
+            <span class="terminal-icon">&gt;_</span>
+            <span class="app-title">DebTerm</span>
+            <span class="badge">PRoot Debian 12</span>
+        </div>
+        <div class="header-controls">
+            <span id="conn-status" class="status-indicator connected">Connected</span>
+            <button id="btn-font-plus" class="hdr-btn" title="Increase Font">A+</button>
+            <button id="btn-font-minus" class="hdr-btn" title="Decrease Font">A-</button>
+            <button id="btn-clear" class="hdr-btn" title="Clear Screen">Clear</button>
+            <button id="btn-restart" class="hdr-btn btn-restart" title="Restart Session">&#8635;</button>
+        </div>
+    </header>
+
+    <main id="terminal-container"></main>
+
+    <!-- Termux-style Extra Keys Row -->
+    <div class="termux-extra-keys">
+        <button class="key-btn" data-key="ESC">ESC</button>
+        <button class="key-btn" data-key="TAB">TAB</button>
+        <button class="key-btn key-toggle" id="key-ctrl" data-toggle="ctrl">CTRL</button>
+        <button class="key-btn key-toggle" id="key-alt" data-toggle="alt">ALT</button>
+        <button class="key-btn" data-input="-">-</button>
+        <button class="key-btn" data-input="/">/</button>
+        <button class="key-btn" data-input="|">|</button>
+        <button class="key-btn" data-key="UP">&#9650;</button>
+        <button class="key-btn" data-key="DOWN">&#9660;</button>
+        <button class="key-btn" data-key="LEFT">&#9664;</button>
+        <button class="key-btn" data-key="RIGHT">&#9654;</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <script>
+        let term;
+        let fitAddon;
+        let ws;
+        let ctrlActive = false;
+        let altActive = false;
+        let currentFontSize = 15;
+
+        const statusEl = document.getElementById('conn-status');
+        const ctrlBtn = document.getElementById('key-ctrl');
+        const altBtn = document.getElementById('key-alt');
+
+        function initTerminal() {
+            term = new Terminal({
+                cursorBlink: true,
+                cursorStyle: 'block',
+                fontSize: currentFontSize,
+                fontFamily: '"JetBrains Mono", "Fira Code", monospace, "DejaVu Sans Mono", Courier',
+                theme: {
+                    background: '#0a0d12',
+                    foreground: '#e6edf3',
+                    cursor: '#58a6ff',
+                    selectionBackground: 'rgba(88, 166, 255, 0.3)',
+                    black: '#0a0d12',
+                    red: '#ff7b72',
+                    green: '#3fb950',
+                    yellow: '#d29922',
+                    blue: '#58a6ff',
+                    magenta: '#bc8cff',
+                    cyan: '#39c5cf',
+                    white: '#b1bac4',
+                    brightBlack: '#6e7681',
+                    brightRed: '#ffa198',
+                    brightGreen: '#56d364',
+                    brightYellow: '#e3b341',
+                    brightBlue: '#79c0ff',
+                    brightMagenta: '#d2a8ff',
+                    brightCyan: '#56d4dd',
+                    brightWhite: '#f0f6fc'
+                }
+            });
+
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.open(document.getElementById('terminal-container'));
+            fitAddon.fit();
+
+            connectWebSocket();
+
+            term.onData(data => {
+                let processed = data;
+                if (ctrlActive) {
+                    if (data.length === 1) {
+                        const code = data.toUpperCase().charCodeAt(0);
+                        if (code >= 64 && code <= 95) {
+                            processed = String.fromCharCode(code - 64);
+                        }
+                    }
+                    toggleCtrl(false);
+                } else if (altActive) {
+                    processed = '\x1b' + data;
+                    toggleAlt(false);
+                }
+                sendInput(processed);
+            });
+
+            window.addEventListener('resize', () => {
+                if (fitAddon) fitAddon.fit();
+            });
+        }
+
+        function connectWebSocket() {
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${proto}//${window.location.host}`;
+
+            statusEl.textContent = 'Connecting...';
+            statusEl.className = 'status-indicator connecting';
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                statusEl.textContent = 'Connected (PRoot)';
+                statusEl.className = 'status-indicator connected';
+                term.focus();
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'output') {
+                        term.write(msg.data);
+                    }
+                } catch (e) {
+                    term.write(event.data);
+                }
+            };
+
+            ws.onclose = () => {
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'status-indicator disconnected';
+            };
+
+            ws.onerror = () => {
+                statusEl.textContent = 'Error';
+                statusEl.className = 'status-indicator disconnected';
+            };
+        }
+
+        function sendInput(data) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'input', data: data }));
+            }
+        }
+
+        function toggleCtrl(forced) {
+            ctrlActive = (forced !== undefined) ? forced : !ctrlActive;
+            ctrlBtn.classList.toggle('active', ctrlActive);
+        }
+
+        function toggleAlt(forced) {
+            altActive = (forced !== undefined) ? forced : !altActive;
+            altBtn.classList.toggle('active', altActive);
+        }
+
+        // Extra keys handler
+        document.querySelectorAll('.termux-extra-keys .key-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                term.focus();
+
+                const key = btn.dataset.key;
+                const input = btn.dataset.input;
+                const toggle = btn.dataset.toggle;
+
+                if (toggle === 'ctrl') {
+                    toggleCtrl();
+                    return;
+                }
+                if (toggle === 'alt') {
+                    toggleAlt();
+                    return;
+                }
+
+                if (input) {
+                    sendInput(input);
+                    return;
+                }
+
+                switch (key) {
+                    case 'ESC': sendInput('\x1b'); break;
+                    case 'TAB': sendInput('\t'); break;
+                    case 'UP': sendInput('\x1b[A'); break;
+                    case 'DOWN': sendInput('\x1b[B'); break;
+                    case 'RIGHT': sendInput('\x1b[C'); break;
+                    case 'LEFT': sendInput('\x1b[D'); break;
+                }
+            });
+        });
+
+        // Toolbar buttons
+        document.getElementById('btn-font-plus').addEventListener('click', () => {
+            currentFontSize = Math.min(26, currentFontSize + 1);
+            term.options.fontSize = currentFontSize;
+            fitAddon.fit();
+        });
+
+        document.getElementById('btn-font-minus').addEventListener('click', () => {
+            currentFontSize = Math.max(10, currentFontSize - 1);
+            term.options.fontSize = currentFontSize;
+            fitAddon.fit();
+        });
+
+        document.getElementById('btn-clear').addEventListener('click', () => {
+            term.clear();
+        });
+
+        document.getElementById('btn-restart').addEventListener('click', () => {
+            if (ws) ws.close();
+            term.reset();
+            setTimeout(connectWebSocket, 300);
+        });
+
+        window.onload = initTerminal;
+    </script>
+</body>
+</html>
